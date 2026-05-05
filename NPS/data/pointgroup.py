@@ -256,7 +256,11 @@ lambda x: x.permute((0, 1, 4, 3, 2, 5)).flip([2, 3, 4])
 
   def __call__(self, x):
     if self.nops > 1:
-      return self.random_op()(x)
+      if x.ndim - self.dim == 2:
+        # OPs assume there is a time dimension. But the input may not have time dimension.
+        return (self.random_op()(x.unsqueeze(1))).squeeze(1)
+      else:
+        return self.random_op()(x)
     else:
       return x
 

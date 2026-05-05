@@ -1,9 +1,9 @@
 import os
 from importlib import import_module
 
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
+# import matplotlib
+# matplotlib.use('Agg')
+# import matplotlib.pyplot as plt
 
 import numpy as np
 
@@ -67,6 +67,9 @@ class Loss(nn.modules.loss._Loss):
                 # loss_function = getattr(module, 'noise_loss')(
                 #     args, loss_type[6:],
                 # )
+            elif loss_type.startswith('Huber_'):
+                delta = float(loss_type.replace('Huber_',''))
+                loss_function = nn.HuberLoss(delta)
             else:
                 raise ValueError('ERROR unknown loss ' + loss_type)
            

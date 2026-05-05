@@ -15,9 +15,11 @@ if not checkpoint.ok:
     exit()
 model = model.Model(args, checkpoint)
 if args.mode == 'export_model':
-    model_scripted = torch.jit.script(model) # Export to TorchScript
-    model_scripted.save(f'{args.export_file}') # Save
+    if False:
+        model_scripted = torch.jit.script(model.get_model()) # Export to TorchScript
+        model_scripted.save(f'{args.export_file}') # Save
     # torch.save(model, f'{args.export_file}')
+    torch.save(model.get_model(), args.export_file)
     print(f'\n written model to {args.export_file}\n')
     exit()
 loader = Data(args)
@@ -48,8 +50,6 @@ elif args.mode == 'trace':
     wrapper = m.export_wrapper(model, args, data=loader)
     wrapper.export(args.export_file)
     print('*'*100, f'\n written model to {args.export_file}\n','*'*100)
-elif args.mode == 'export_model':
-    pass
 else:
     raise ValueError(f'Unknown job mode {args.mode}')
 

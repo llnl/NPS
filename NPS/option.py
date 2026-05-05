@@ -7,7 +7,7 @@ parser = argparse.ArgumentParser(description='NPS')
 #################### Add model-specific arguments ####################
 post_processors = []
 for x in sys.argv[1:]:
-    if x.startswith(('--register_args=', '--model=', '--datatype=', '--dataset=', '--core=')):
+    if x.startswith(('--register_args=', '--model=', '--datatype=', '--dataset=')): #'--core='
         x = ('NPS.data.' if x.startswith('--data') else ('NPS.model.' if (x.startswith('--model') and (not '.' in x)) else '')) + re.sub(r'^--\w*=', '', x)
         if "--debug" in sys.argv: module = import_module(x)
         if not x:
@@ -39,7 +39,7 @@ parser.add_argument('--seed', type=int, default=54321, help='Rand seed')
 parser.add_argument('--dataset_seed', type=int, default=54321, help='Rand seed for datase')
 parser.add_argument('--debug', action='store_true', help='Enables debug mode')
 # Hardware specifications
-parser.add_argument('--n_threads', type=int, default=3, help='number of threads for data loading')
+# parser.add_argument('--n_threads', type=int, default=3, help='number of threads for data loading')
 parser.add_argument('--cpu', action='store_true', help='use cpu only')
 parser.add_argument('--n_GPUs', type=int, default=1, help='number of GPUs')
 
@@ -62,7 +62,7 @@ parser.add_argument('--save_results', action='store_true',
 parser.add_argument('--data', type=str, default='', help='Directory to load dataset from.')
 parser.add_argument('--dataloader', type=str, default='torch', choices=('', 'torch', 'geometric'), help='Loader')
 parser.add_argument('--single_dataset', type=int, default=0, help='load from a single dataset')
-parser.add_argument('--train_split', type=float, default=0.9, help='train set ratio if single_dataset')
+parser.add_argument('--train_split', type=float, default=-0.9, help='train set ratio if single_dataset, set to negative to split proportionally')
 parser.add_argument('--data_train', '--file_train', type=str, default=None, help='train dataset. Empty to default to DATA/train.npy')
 parser.add_argument('--data_valid', '--file_test', type=str, default=None, help='valid dataset. Empty to default to DATA/valid.npy')
 parser.add_argument('--data_predict', '--file_predict', type=str, default=None, help='predict dataset. Empty to default to DATA/test.npy')
@@ -73,10 +73,12 @@ parser.add_argument('--datatype_valid', type=str, default='', help='validation d
 parser.add_argument('--datatype_predict', type=str, default='', help='prediction dataset type. Defaults to --datatype')
 parser.add_argument('--dim', type=int, default=2, help='dimension (default 2d image, or 3d simulation')
 parser.add_argument('--periodic', action='store_true', default=False, help='NPS periodic boundary condition')
+parser.add_argument('--pbc_xyz', type=str, default='', help='NPS periodic boundary condition for x,y,z')
 parser.add_argument('--frame_shape', type=str, default='', help='frame shape, e.g. 64,64')
 parser.add_argument('--nfeat_in', type=int, default=1, help='nfeat_in')
 parser.add_argument('--nfeat_out', type=int, default=-1, help='nfeat_out, default (-1) to nfeat_in')
 parser.add_argument('--nfeat_out_global', type=int, default=0, help='no. of global output channels per graph')
+parser.add_argument('--nfeat_cond', type=int, default=0, help='conditioning features')
 parser.add_argument('--cache', type=bool, default=False, help='Cache whole dataset into memory')
 parser.add_argument('--n_in', type=int, default=1, help='no. of input frames')
 parser.add_argument('--n_in_valid', type=int, default=-1, help='n_in for validation')
@@ -84,11 +86,16 @@ parser.add_argument('--n_in_predict', type=int, default=-1, help='n_in for predi
 parser.add_argument('--n_out', type=int, default=1, help='no. of output frames')
 parser.add_argument('--n_out_valid', type=int, default=-1, help='n_out for validation')
 parser.add_argument('--n_out_predict', type=int, default=-1, help='n_out for prediction')
+parser.add_argument('--n_hist', type=int, default=1, help='no. of input history frames at EACH input, i.e. input will be time series')
+parser.add_argument('--input_hist', type=int, default=0, help='If true, input will be a time series')
 parser.add_argument('--clip_step', type=int, default=1, help='No. of starting frames to skip when sampling the next sequence: starting frames are ::clip_step')
 parser.add_argument('--nskip', type=int, default=1, help='Sampled clip are start_frame:start_frame+(n_in+n_out)*nskip:nskip')
+parser.add_argument('--nskip_valid', type=int, default=-1)
+parser.add_argument('--nskip_predict', type=int, default=-1)
 parser.add_argument('--clip_step_valid', type=int, default=-1, help='clip_step for validation')
 parser.add_argument('--clip_step_predict', type=int, default=-1, help='clip_step for prediction')
 parser.add_argument('--data_slice', default='', help='Slice input data, default no slicing, Example: ":50" limits training sequences to 50 (to study training vs dataset size); "...,:1" ignores channels after 1st. THIS CHANGES DATA ITSELF')
+parser.add_argument('--data_slice_test', default=':')
 parser.add_argument('--data_filter', default='', help='Filter with a bool function on sequences, default off, e.g. "np.mean(x)>1". THIS CHANGES DATA ITSELF')
 parser.add_argument('--data_preprocess', default='', help='Preprocess data, default off, e.g. function "np.clip(x,0,1)" ; dict "{"name":"fft","tkeep": 0.1,"skeep":0.2}". THIS CHANGES DATA ITSELF')
 parser.add_argument('--space_CG', action='store_true', help='Spatial coarse-graining by averaging, as specified by frame_shape')
@@ -96,10 +103,19 @@ parser.add_argument('--time_CG', type=int, default=1, help='Time coarse-graining
 parser.add_argument('--channel_first', action='store_true', help='Transform a channel last dataset to channel first after reading')
 parser.add_argument('--data_setting', default='{}', help='Additional data settings, e.g. "{\'splitoffset\'=100}"')
 parser.add_argument('--batch', '--minibatch_size', type=int, default=4, help='batch size')
+parser.add_argument('--accu_step', type=int, default=1, help='number of accumulation steps between gradient descent')
 parser.add_argument('--batch_valid', type=int, default=-1, help='batch size for validation')
 parser.add_argument('--batch_predict', type=int, default=-1, help='batch size for prediction')
 parser.add_argument('--mean_std_in', default='', help='for each channel, the mean and std, e.g."0,1,100,200" sets mean to 0, 100 and normalize by 1, 200 for two input channels, respectively')
 parser.add_argument('--mean_std_out', default='')
+parser.add_argument('--spatial_dims', default='-3,-2', help="which are spatial dimensions")
+parser.add_argument('--nfeat_tgt', type=int, default=-1, help='no. of features to include in "target" for training')
+# Secondary dataset
+parser.add_argument('--data2', type=str, default='', help='Secondary dataset if set')
+parser.add_argument('--dataloader2', type=str, default='')
+parser.add_argument('--datatype2', type=str, default='')
+parser.add_argument('--num_workers', type=int, default=0, help='for dataloader')
+
 
 
 #################### Model ####################
@@ -120,12 +136,15 @@ parser.add_argument('--norm_layer', type=str, default='', help='empty: no normal
 parser.add_argument('--evaluator', type=str, default='cfd_eval', help='Select rollout method.')
 parser.add_argument('--conserved', default='0', help='comma separated flags for whether the channels are conserved')
 parser.add_argument('--patch_size', type=int, default=1, help='patch size for reshaping input')
+parser.add_argument('--periodic_CNN', type=int, default=-1, help='periodic boundary condition for CNN, -1=same as args.periodic, 0=off, 1=on')
 # GNN specific
 parser.add_argument("--n_node_type", default=2, type=int, help="No. of node types")
 parser.add_argument("--node_type", default='', help="Node types")
 parser.add_argument("--n_edge_type", default=1, type=int, help="No. of edge types")
 parser.add_argument('--edge_cutoff', type=float, default=8.1, help='GNN edge cutof distance')
-parser.add_argument('--node_y', type=str, default='node_y', help='key node_y against which to train the property in train_non_seq')
+parser.add_argument('--node_y', '--key_out', type=str, default='node_y', help='key of output property in train_non_seq')
+parser.add_argument('--key_out_gt', type=str, default='', help='key of exported GT property in train_non_seq')
+parser.add_argument('--key_in', type=str, default='', help='key of input property in train_non_seq, empty to ignore')
 # ### Mesh
 # parser.add_argument('--amr_N', type=int, default=64, help='system size, i.e. how many (fine) grids totally')
 # parser.add_argument('--amr_N1', type=int, default=1, help='how many (fine) grids to bin into one, 1 to disable')
@@ -193,11 +212,13 @@ parser.add_argument('--ema_decay', type=float, default=0.995, help='ExponentialM
 parser.add_argument('--loss', type=str, default='1*L1',
                     help='loss function configuration')
 parser.add_argument('--loss_wt', type=str, default='', help='weight of itemized losses, e.g. 1e0,1e-2')
+parser.add_argument('--loss_wt_init', type=str, default='', help='initial loss weight')
+parser.add_argument('--loss_wt_nramp', type=int, default=20, help='no. of steps to transition to loss weight')
 parser.add_argument('--loss_from_model', type=int, default=0, help='provide target to model so it produces (y, loss), not just y')
 # parser.add_argument('--stoch_loss', default='NLL', help='')
 parser.add_argument('--skip_threshold', type=float, default='1e6',
                     help='skipping batch that has large error')
-parser.add_argument('--rnn_scheduled_sampling', type=str, default='GT',
+parser.add_argument('--scheduled_sampling', type=str, default='PD',
   help="""PD:always use PD
   GT: always use GT
   decrease: set sampling_stop_iter sampling_start_value sampling_changing_rate
@@ -220,8 +241,12 @@ parser.add_argument('--beta1', type=float, default=0.9, help='beta1')
 parser.add_argument('--beta2', type=float, default=0.999, help='beta1')
 parser.add_argument('--epsilon', type=float, default=1e-8, help='epsilon')
 parser.add_argument('--momentum', type=float, default=0, help='momentum')
+### stability of training
+parser.add_argument('--grad_clip', type=float, default=0.0, help='Clip gradients by norm, Default 0 to disable')
+
 # scheduler
 parser.add_argument('--scheduler', type=str, default='plateau', help='lr reduction schedule')
+parser.add_argument('--scheduler_at_epoch', type=int, default=1, help='1: scheduler called at each epoch; 0 at each step (recommended for diffusion model)')
 parser.add_argument('--lr_decay_step', type=int, default=500, help='Learning rate decay factor.')
 parser.add_argument('--lr_decay_factor', type=float, default=0.3, help='Learning rate decay steps.')
 parser.add_argument('--lr_decay_patience', type=int, default=4, help='Learning rate decay steps.')
@@ -231,6 +256,7 @@ parser.add_argument('--lr_decay_patience', type=int, default=4, help='Learning r
 #                     help='learning rate decay factor for step decay')
 ### Predict job
 parser.add_argument('--file_out', type=str, default='', help='file to save output file')
+parser.add_argument('--suffix_out', type=str, default='npy', help='format of output file')
 parser.add_argument('--n_traj_out', '--n_rollout', type=int, default=-1, help='No. of rollout trajectories')
 parser.add_argument('--predict_only', action='store_true',
                     help='set this option to test the model without GT.')
@@ -251,7 +277,7 @@ parser.add_argument('--use_wandb', action='store_true',
 parser.add_argument('--resume_wandb_log', action='store_true',
                     help='resume logging in the same run')
 parser.add_argument('--wandb_args', type=str, nargs='*', help='choose which args to keep track of')
-parser.add_argument('--wandb_plt_freq', type=int, default=5, help='wandb plot frequency (epoch)') 
+parser.add_argument('--wandb_plt_freq', type=int, default=5, help='wandb plot frequency (epoch)')
 
 #################### Exporting ####################
 parser.add_argument('--export_wrapper', type=str, default='', help='module for tracing & exporting model')
@@ -259,6 +285,8 @@ parser.add_argument('--export_file', type=str, default='exported.pt', help='save
 
 #################### Validation/Prediction ####################
 parser.add_argument('--gt_in_out', action='store_true', help='Include the GT sequence in output sequence')
+parser.add_argument('--nstep_valid', type=int, default=-1, help='max number of validation steps')
+parser.add_argument('--epoch_in_pd_file', type=int, default=1, help='Include the epoch number in prediction output file name')
 
 args = parser.parse_args()
 # from NPS import template
@@ -280,6 +308,8 @@ if not args.resume:
 
 #################### Data ####################
 args.periodic = bool(args.periodic)
+if args.periodic_CNN == -1:
+    args.periodic_CNN = args.periodic
 if not args.data_train:
     args.data_train = args.data+'/train'
 if not args.data_valid:
@@ -305,6 +335,10 @@ if args.n_out_valid == -1:
     args.n_out_valid = args.n_out
 if args.n_out_predict == -1:
     args.n_out_predict = args.n_out_valid
+if args.nskip_valid == -1:
+    args.nskip_valid = args.nskip
+if args.nskip_predict == -1:
+    args.nskip_predict = args.nskip_valid
 if args.clip_step_valid == -1:
     args.clip_step_valid = args.clip_step
 if args.clip_step_predict == -1:
@@ -320,6 +354,7 @@ if args.test_set == 'predict':
     args.datatype_test = args.datatype_predict
     args.n_in_test = args.n_in_predict
     args.n_out_test = args.n_out_predict
+    args.nskip_test = args.nskip_predict
     args.clip_step_test = args.clip_step_predict
     args.batch_test = args.batch_predict
 else:
@@ -327,6 +362,7 @@ else:
     args.datatype_test = args.datatype_valid
     args.n_in_test = args.n_in_valid
     args.n_out_test = args.n_out_valid
+    args.nskip_test = args.nskip_valid
     args.clip_step_test = args.clip_step_valid
     args.batch_test = args.batch_valid
 if args.ngram > 1: assert args.ngram <= args.n_in and args.ngram <= args.n_in_test
@@ -335,6 +371,18 @@ if args.node_type:
     assert args.n_node_type == len(args.node_type)
 args.mean_std_in =  str2list(args.mean_std_in,  float)
 args.mean_std_out = str2list(args.mean_std_out, float)
+args.spatial_dims = list(map(int, filter(bool,args.spatial_dims.split(','))))
+args.key_out_gt = args.key_out_gt or args.node_y
+if args.data2:
+    args.dataloader2 = args.dataloader2 or args.dataloader
+    args.datatype2 = args.datatype2 or args.datatype
+
+# if input is time series
+if args.n_hist > 1: assert args.input_hist
+assert args.n_in >= args.n_hist
+
+if args.nfeat_tgt == -1:
+    args.nfeat_tgt = args.nfeat_out
 
 #################### Model ####################
 args.kernel_size = str2list(args.kernel_size)

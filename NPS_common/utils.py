@@ -2,6 +2,7 @@ import os
 import numpy as np
 import functools
 import re
+from scipy import stats
 
 
 def grid_points(Ns, corner=True):
@@ -137,6 +138,17 @@ def str2slice(s, range_only=False):
     return s
 
 
+def str2selection(s, **kwx):
+    """
+    s: e.g. "1,2,5" or "1:5" or "1:10:2"
+    returns: list of int
+    """
+    if ":" in s:
+        return str2slice(s, **kwx)
+    else:
+        return str2list
+
+
 def unique_list_str(list_str):
     import itertools
     return list(sorted(set(itertools.chain.from_iterable(list_str))))
@@ -170,3 +182,39 @@ def kde_plot_data(data, n_plot_pixel=200, plot_buffer=0.1, bw_method=None):
     kde = gaussian_kde(data.T, bw_method=bw_method)(plot_pts.reshape(dim, -1)).reshape(plot_pts.shape[1:])
     return np.concatenate((plot_pts, kde[None, ...]), 0)
 
+
+def molecule_diameter(atoms):
+    R = atoms.positions
+    return np.linalg.norm(R[:,None]-R[None,:], axis=-1).max()
+
+
+def shape2index_mult(shape):
+    return (np.cumprod([1]+list(shape)[:0:-1])[::-1]).copy()
+
+
+def plot_analyze_gt_pd(ax, gt, pd, verbose=True, annotate=True, s=2.0):
+    gt = gt.ravel()
+    pd = pd.ravel()
+    res = stats.linregress(gt, pd)
+    ax.scatter(gt, pd, s=s)
+    # text_info = f'({rmse/np.std(gt)*100:.2f}%) mae= {np.mean(np.abs(pd-gt)):.3g}'
+    text_info = f"pears={stats.pearsonr(gt,pd).statistic:.3f}"
+    if annotate: ax.text(0.01, 0.75, text_info, transform=ax.transAxes)
+    if verbose: print(text_info)
+        #axs[0].text(0.05, 0.95, f'$R^2$= {res.rvalue**2:.4f} ')#std= {np.std(pd-gt):.3g} mae= {np.mean(np.abs(pd-gt)):.3g}', transform=axs[0].transAxes)
+    add_identity(ax, color='r', ls='--')
+
+
+# from https://stackoverflow.com/questions/22104256/does-matplotlib-have-a-function-for-drawing-diagonal-lines-in-axis-coordinates
+def add_identity(axes, *line_args, **line_kwargs):
+    identity, = axes.plot([], [], *line_args, **line_kwargs)
+    def callback(axes):
+        low_x, high_x = axes.get_xlim()
+        low_y, high_y = axes.get_ylim()
+        low = max(low_x, low_y)
+        high = min(high_x, high_y)
+        identity.set_data([low, high], [low, high])
+    callback(axes)
+    axes.callbacks.connect('xlim_changed', callback)
+    axes.callbacks.connect('ylim_changed', callback)
+    return axes

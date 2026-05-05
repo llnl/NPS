@@ -44,18 +44,22 @@ class slice_operator:
             "TBD"
         else:
             start = [r(0, shape[i]-self.specs[i]+1) if self.specs[i]>0 else 0 for i in range(self.dim)]
-            s = tuple([slice(0,None)]*dim_sp + 
+            s = tuple([slice(0,None)]*dim_sp +\
               [slice(start[i], start[i]+ self.specs[i] if self.specs[i]>0 else None) for i in range(self.dim)])
             return x[s]
 
-
-from e3nn import o3
+# from NPS_common.random_rot import rand_rot
+from NPS_common.pt_utils import rand_rotmat3d as rand_rot
 def _rand_rotate_o3(g):
-    rot = o3.rand_matrix()
+    rot = rand_rot()
     for attr in ('pos', 'velocities', "positions", "forces", "cell", "edge_vec_correction"):
         # if hasattr(g, attr):
         try:
-            g[attr] = g[attr] @ rot.T
+            if isinstance(g, (list, tuple)):
+                for ig in range(len(g)):
+                    g[ig][attr] = g[ig][attr] @ rot.T
+            else:
+                g[attr] = g[attr] @ rot.T
         except:
             pass
     return g
@@ -64,13 +68,13 @@ class data_augment_operator:
     def __init__(self, args):
         # super().__init__()
         ops = list(filter(bool, args.data_aug.split(',')))
-        print(f'During training, augmenting data with {ops}')
         # assert all([x in ('spg', 'slice', 'noise') for x in ops])
         self.pointgroup_op = PointGroup(args.pointgroup, args.dim, args.channel_first) if args.pointgroup != '1' else lambda x:x
         self.slice_op = slice_operator(args) if args.slice_op else lambda x:x
         self.noise_op = noise_operator(args.noise_op)
         op_dict = {'spg': self.pointgroup_op, 'slice': self.slice_op, 'noise': self.noise_op, 'rot_o3': _rand_rotate_o3}
         self.ops = [op_dict[x] for x in ops]
+        print(f'During training, augmenting data with {ops} {self.ops=}')
 
     def __call__(self, x):
         for op in self.ops:

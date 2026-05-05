@@ -5,16 +5,11 @@ import numpy as np
 from NPS_common.utils import load_array_auto
 
 def register_args(parser):
+    # parser.add_argument('--data_slice_test', default=None, type=str)
     pass
 
 def post_process_args(args):
     pass
-    # if not os.path.exists(args.data_train):
-    #     args.data_train += '.npy'
-    # if not os.path.exists(args.data_valid):
-    #     args.data_valid += '.npy'
-    # if not os.path.exists(args.data_predict):
-    #     args.data_predict += '.npy'
 
 class longclip:
     def __init__(self, args, datf, tot_len, clip_step, nskip=1, split='train', **kwx):
@@ -25,7 +20,7 @@ class longclip:
         self.tot_len = tot_len
         self.tot_len_frame = (self.tot_len-1)*self.nskip + 1
         data= self.load_data(datf)
-        data = self.dataset_preprocess(args, data, **kwx)
+        data = self.dataset_preprocess(args, data, data_slice=args.data_slice if self.is_train_set else args.data_slice_test, **kwx)
         self.nclip = len(data)
         # start_pos = [np.arange(0,self.clip_len-self.tot_len_frame+1,clip_step)+i*self.clip_len for i in range(self.nclip)]
         # self.start_pos = np.array(start_pos).ravel()
@@ -34,10 +29,10 @@ class longclip:
         self.start_pos = np.concatenate(start_pos)
         self.dataset_postprocess(args, data, **kwx)
 
-    def dataset_preprocess(self, args, data, **kwx):
-        if args.data_slice:
-            print('data slicing with', args.data_slice)
-            f = eval(f'lambda x: x[{args.data_slice}]')
+    def dataset_preprocess(self, args, data, data_slice="", **kwx):
+        if data_slice:
+            print('data slicing with', data_slice)
+            f = eval(f'lambda x: x[{data_slice}]')
             data = [f(d) for d in data]
         if args.data_filter:
             print('data filtering with', args.data_filter)
@@ -86,7 +81,7 @@ class longclip:
     def dataset_postprocess(self, args, data, **kwx):
         self.flat = np.concatenate(data)
         if args.mean_std_in:
-            self.flat = (self.flat - np.array(args.mean_std_in)[::2]) / np.array(args.mean_std_in)[1::2]
+            self.flat = ((self.flat - np.array(args.mean_std_in)[::2]) / np.array(args.mean_std_in)[1::2]).astype(self.flat.dtype)
         if args.channel_first:
             self.flat = self.flat.transpose(0, 1+self.dim, *tuple(range(1,1+self.dim)))
         # self.flat = data.reshape((-1,)+data.shape[2:])
@@ -94,12 +89,15 @@ class longclip:
         self.statistics = {}
 
     def _load_data(self, f):
-        f += ('', '.npy', '.npz')[[os.path.exists(f+suffix) for suffix in ('', '.npy', '.npz')].index(True)]
+        try:
+            f += ('', '.npy', '.npz')[[os.path.exists(f+suffix) for suffix in ('', '.npy', '.npz')].index(True)]
+        except:
+            raise ValueError(f"cannot load array in {f}")
         print(f' Loading npy array {f}')
         return load_array_auto(f)
 
     def load_data(self, f):
-        suffix = 'npy'
+        suffix = "np?" #self.args.data_suffix
         files = sorted(glob.glob(f+f'/*.{suffix}')) if os.path.isdir(f) else [f]
         if os.path.isdir(f) and os.path.exists(f'{f}.npy'):
             print(f'*** WARNING: *** found both directory {f} and file {f}.npy. Ignore the latter. ARE YOU SURE???')
@@ -119,10 +117,14 @@ class longclip:
         import ast
         pp_opt = ast.literal_eval(pp_opt_str)
         import sys
-        sys.path.insert(0, '.')
+        # sys.path.insert(0, '.')
         from NPS_common import smooth
-        if pp_opt.get("name", "fft") == "fft":
-            return smooth.smooth_array_fft_np(a, keep_frac=(pp_opt['tkeep'],)+((pp_opt['skeep'],)*(self.dim)), nbatch=1, array_only=True)
+        fft_ch = pp_opt.get("fft_channel", [])
+        if (pp_opt.get("name", "fft") == "fft") and fft_ch:
+            a_smooth = smooth.smooth_array_fft_np(a[...,fft_ch[0]:fft_ch[1]], keep_frac=(pp_opt['tkeep'],)+((pp_opt['skeep'],)*(self.dim)), nbatch=1, array_only=True)
+        # np.save('tmpbefore.npy', a)
+        # np.save('tmpafter.npy', np.concatenate((a[...,:fft_ch[0]], a_smooth.astype(np.float32), a[...,fft_ch[1]:]), -1))
+        return np.concatenate((a[...,:fft_ch[0]], a_smooth.astype(np.float32), a[...,fft_ch[1]:]), -1)
 
     def shuffle(self):
         np.random.shuffle(self.start_pos)

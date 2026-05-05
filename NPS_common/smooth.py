@@ -34,6 +34,16 @@ def laplacian_fft_np(a_f, freq, dx_indices, axes=(1,2,3,4)):
     return np.fft.ifftn(-(2*np.pi)**2 *a_f* np.sum(freq[None,...,dx_indices]**2,axis=-1,keepdims=True), axes=axes).real
 
 
+def moving_average_smoothing(a, ker=3, periodic=True, dim=2):
+    import torch
+    # from einops import rearrange
+    s = list(a.shape)
+    a = torch.from_numpy(a).float().permute(list(range(len(s)-dim-1))+[-1]+list(range(-dim-1,-1))).reshape([-1,1]+s[-dim-1:-1])
+    from NPS.model.common import Averaging_Conv
+    op = Averaging_Conv(dim=dim, periodic=periodic, ker=ker)
+    a_smooth = op(a)
+    return a_smooth.permute([0]+list(range(2,2+dim))+[1]).reshape(s).numpy()
+
 if __name__ == '__main__':
     # a = np.load('/g/g90/zhou6/data/LJ20new/valid.npy')
     # smooth_array_fft_np(a, nbatch=1)

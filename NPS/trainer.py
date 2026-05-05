@@ -14,11 +14,17 @@ from .data.data_augment import data_augment_operator
 def make_trainer(args, loader, model, loss, checkpoint):
     return Trainer(args, loader, model, loss, checkpoint)
 
-def get_frame(x, sl):
+def get_frame(x, sl, n_hist=1, hist=0):
     if isinstance(x, (list, tuple)):
-        return x[sl]
+        if hist == 0:
+            return x[sl]
+        else:
+            return x[sl:sl+n_hist]
     else:
-        return x[:, sl]
+        if hist == 0:
+            return x[:, sl]
+        else:
+            return x[:, sl:sl+n_hist]
 
 class Trainer():
     def __init__(self, args, loader, model, loss, ckp):
@@ -29,6 +35,8 @@ class Trainer():
         self.ckp = ckp
         self.loader_train = loader.train
         self.loader_test = loader.test
+        if args.data2:
+            self.loader_train2 = loader.train2; self.loader_test2 = loader.test2
         self.model = model
         self.loss = loss
         self.augment_op = data_augment_operator(args)
@@ -65,7 +73,20 @@ class Trainer():
         self.preprocess_data(loader.loader_func)
         self.train_generator = self.get_training_batch()
         if args.epoch_size == -1: args.epoch_size = len(self.loader_train)
-        # if args.n_traj_out == -1: args.n_traj_out = len(self.loader_test) * args.batch 
+        # if args.n_traj_out == -1: args.n_traj_out = len(self.loader_test) * args.batch
+        if args.loss_wt_init:
+            self._loss_wt_init = np.array(list(map(float,args.loss_wt_init.split(","))))
+            self._loss_wt_final = np.array(args.loss_wt)
+            self.loss_wt = self._loss_wt_init[:]
+        else:
+            self.loss_wt = np.array(args.loss_wt)
+
+    def loss_wt_step(self, epoch):
+        if self.args.loss_wt_init:
+            self.loss_wt = (self._loss_wt_final - self._loss_wt_init)* min(1, epoch/self.args.loss_wt_nramp) + self._loss_wt_init
+
+    def get_ch(self, x, sl, with_time=False):
+        return x if isinstance(x, (tuple, list)) else ((x[:,:,sl] if with_time else x[:,sl]) if self.args.channel_first else x[..., sl])
 
     def preprocess_data(self, loader_func):
         # loader_train/test is just dataset, not loader yet
@@ -103,13 +124,11 @@ class Trainer():
             self.model.train()
             for i in range(1, self.args.epoch_size+1):
                 x = self.to_device(next(self.train_generator))
-                # print(f'debug x in train {x.shape} epo {epoch} {i} opt.epoch_size {opt.epoch_size} opt.niter {opt.niter}')
                 loss = self.train_batch(x, epoch=epoch)
                 # single loss, or (loss, (loss_items))
                 if isinstance(loss, tuple):
                     if len(loss[1]): loss_epoch_item.append(loss[1])
                     loss = loss[0]
-                # print(f'debug got loss {loss}')
                 loss_epoch += loss
                 if i % self.args.print_freq == 0:
                     print(f'  {i} loss_batch {loss:7.3e} {a1line(loss_epoch_item[-1]) if loss_epoch_item else ""} averaged {loss_epoch/i:7.3e}')
@@ -126,10 +145,17 @@ class Trainer():
             if self.loss_valid_min > loss_valid[0]:
                 self.loss_valid_min = loss_valid[0]
                 is_best = True
-            if self.args.scheduler == 'plateau':
-                self.scheduler.step(loss_valid[0])
-            else:
-                self.scheduler.step()
+            if self.args.scheduler_at_epoch:
+                if self.args.scheduler == 'plateau':
+                    self.scheduler.step(loss_valid[0])
+                else:
+                    self.scheduler.step()
+                try:
+                    current_lr = self.scheduler.get_last_lr()[0]  # get_last_lr() returns a list
+                    print(f"    LR: {current_lr:.3g}")
+                except:
+                    pass
+            self.loss_wt_step(epoch)
 
             # save the model
             if True:
@@ -158,6 +184,7 @@ class Trainer():
         sp = 3 if args.channel_first else 2
         with torch.no_grad():
             for i, x in enumerate(self.loader_test):
+                if args.nstep_valid >= 0 and i >= args.nstep_valid: break
                 if isinstance(x, (tuple, list)): cell = tuple(x[0].cell_shape[:args.dim].cpu().numpy()) if args.dim>0 else tuple()
                 if predict_only and (n_pd >= args.n_traj_out):
                     break
@@ -165,19 +192,23 @@ class Trainer():
                 # print("before eval", x, [ix.x.shape for ix in get_frame(x,slice(n_in,n_in+n_out))])
                 pd, loss_item = self.evaluate_batch(self.to_device(x), predict_only)
                 # print("after eval",  x, [ix.x.shape for ix in get_frame(x,slice(n_in,n_in+n_out))])
+                pd = self.get_ch(pd, slice(0, args.nfeat_out), with_time=True)
                 pd = pd.detach().cpu()
                 # if isinstance(x, (tuple, list)):
                 #     pd = pd.reshape((len(x[0].ptr)-1,)+cell + (n_out,-1,)).
                 n_pd += len(pd)
                 pd_all.append(pd)
-                gt_in.append(torch.stack([ix.x.cpu().reshape((len(x[0].ptr)-1,)+cell + (-1,)) for ix in get_frame(x,slice(None,n_in))],1) if isinstance(x, (tuple, list)) else get_frame(x,slice(None,n_in)))
+                gt = torch.stack([ix.x.cpu().reshape((len(x[0].ptr)-1,)+cell + (-1,)) for ix in get_frame(x,slice(None,n_in))],1) if isinstance(x, (tuple, list)) else get_frame(x,slice(None,n_in))
+                gt = self.get_ch(gt, slice(0, args.nfeat_out), with_time=True)
+                gt_in.append(gt)
                 if not predict_only:
                     gt = torch.stack([ix.x.cpu().reshape((len(x[0].ptr)-1,)+cell + (-1,)) for ix in get_frame(x,slice(n_in,n_in+n_out))],1) if isinstance(x, (tuple, list)) else get_frame(x,slice(n_in,n_in+n_out))
+                    gt = self.get_ch(gt, slice(0, args.nfeat_out), with_time=True)
                     gt_all.append(gt)
                     # print("pd.shape, gt.shape, gt_in.shape", pd.shape, gt.shape, gt_in[-1].shape, x, [ix.x.shape for ix in get_frame(x,slice(n_in,n_in+n_out))])
                     mse_detail.append(torch.mean((pd-gt)**2 , axis=tuple(range(sp,sp+args.dim))) if args.dim>0 else (pd-gt)**2)
                     mae_detail.append(torch.mean(torch.abs(pd-gt) , axis=tuple(range(sp,sp+args.dim))) if args.dim>0 else (pd-gt).abs())
-                    losses.append([self.loss(pd, gt)] if (loss_item is None) or (loss_item==[]) else loss_item)
+                    losses.append([self.loss(pd, gt)] if (loss_item is None) or (len(loss_item)==0) else loss_item)
             if losses: losses = tuple(np.mean(losses, 0))
             # validation loss from model directly
             if (not predict_only) and args.loss_from_model:
@@ -231,25 +262,27 @@ class Trainer():
     def model_y_loss(self, x_in, target, loss_from_model=False, reset=True):
         """The model may either directly return a prediction, or prediction, loss and itemized losses"""
         y = self.model(x_in, reset=reset, target=target if loss_from_model else None, criterion=self.loss, mask=None)
-        if target is None:
-            return y, 0, []
         if isinstance(y, tuple):
             y, loss_step_item = y
-            loss_step = self.step_loss(loss_step_item)
-            loss_step_item = [x.item() for x in loss_step_item if len(loss_step_item)>1]
+        elif target is None:
+            return y, 0, []
         else:
-            loss_step = self.loss(y, target)
-            loss_step_item = []
+            loss_step_item = [self.loss(y, self.get_ch(target, slice(0,self.args.nfeat_out)))]
+        loss_step = self.step_loss(loss_step_item)
+        loss_step_item = [x.item() for x in loss_step_item if len(loss_step_item)>1]
         return y, loss_step, loss_step_item
 
     def step_loss(self, loss_step_item):
         if self.args.loss_wt:
-            return sum([loss_step_item[i]*self.args.loss_wt[i] for i in range(len(loss_step_item))])
+            return sum([loss_step_item[i]*self.loss_wt[i] for i in range(len(loss_step_item))])
         else:
             return sum(loss_step_item)
 
     def training_callback(self, *x, **kwx):
+        if self.args.grad_clip > 0:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.args.grad_clip)
         self.optimizer.step()
+        self.optimizer.zero_grad()
         self.model.ema.update()
 
     def train_batch(self, x, epoch=1, is_train=True):
@@ -259,25 +292,39 @@ class Trainer():
         RNN = args.RNN
         loss = 0
         loss_item = []
-        if is_train: self.optimizer.zero_grad()
-        for ei in range(n_in-1):
-            target = get_frame(x, ei+1)
-            tgt = target if isinstance(x, (tuple, list)) else (target[:, :self.args.nfeat_out] if args.channel_first else target[..., :self.args.nfeat_out])
-            y, step_loss, step_loss_item = self.model_y_loss(get_frame(x, ei), tgt, reset=(ei==0), loss_from_model=args.loss_from_model)
+        sl_tgt = slice(0, args.nfeat_tgt)
+        # if is_train: self.optimizer.zero_grad()
+        for ei in range(n_in-args.n_hist):
+            target = get_frame(x, ei+args.n_hist)
+            tgt = self.get_ch(target, sl_tgt)
+            y, step_loss, step_loss_item = self.model_y_loss(get_frame(x, ei, args.n_hist, args.input_hist), tgt, reset=(ei==0), loss_from_model=args.loss_from_model)
             if step_loss_item: loss_item.append(step_loss_item)
             loss += step_loss
-        x_in = get_frame(x,n_in-1)
+        x_in = get_frame(x,n_in-args.n_hist, args.n_hist, args.input_hist)
         for di in range(n_out):
             target = get_frame(x,n_in+di)
-            tgt = target if isinstance(x, (tuple, list)) else (target[:, :self.args.nfeat_out] if args.channel_first else target[..., :self.args.nfeat_out])
+            tgt = self.get_ch(target, sl_tgt)
             y, step_loss, step_loss_item = self.model_y_loss(x_in, tgt, reset=(not RNN) or ((n_in==1) and (di==0)), loss_from_model=args.loss_from_model)
             if step_loss_item: loss_item.append(step_loss_item)
             loss += step_loss
             if (di < n_out-1) and args.nfeat_in>args.nfeat_out and (not isinstance(x, (tuple, list))):
-                y = torch.cat([y, target[:, args.nfeat_out:] if args.channel_first else target[..., args.nfeat_out:]], self.ich)
-            if di < n_out-1: x_in = self.get_scheduled_input(y, target, epoch)
+                y = torch.cat([y, self.get_ch(target, slice(args.nfeat_out,args.nfeat_in))], self.ich)
+            if di < n_out-1:
+                x_in_frame = self.get_scheduled_input(y, target, epoch)
+                if args.input_hist:
+                    x_in = torch.cat((x_in[:, :-1], x_in_frame[:,None]), self.ich)
+                else:
+                    x_in = x_in_frame
         if is_train: loss.backward()
-        if is_train: self.training_callback()
+        if is_train and (epoch%args.accu_step==0): self.training_callback()
+        if is_train and (not self.args.scheduler_at_epoch):
+            if self.args.scheduler == 'plateau':
+                print(f"warning: for training with reduce-on-plateau, set scheduler_at_epoch=1")
+                self.scheduler.step(-1.)
+            else:
+                self.scheduler.step()
+            current_lr = self.scheduler.get_last_lr()[0]  # get_last_lr() returns a list
+            print(f"    LR: {current_lr:.3g}")
         return loss.item() / n_out, np.mean(loss_item, 0) if loss_item else []
 
     def evaluate_batch(self, x, predict_only=False):
@@ -288,26 +335,33 @@ class Trainer():
         traj = []
         loss = 0
         loss_item = []
+        sl_tgt = slice(0, args.nfeat_tgt)
         for ei in range(n_in-1):
-            target = None if predict_only else get_frame(x, ei+1)
-            tgt = None if predict_only else (target if isinstance(x, (tuple, list)) else (target[:, :self.args.nfeat_out] if args.channel_first else target[..., :self.args.nfeat_out]))
-            y, step_loss, step_loss_item = self.model_y_loss(get_frame(x,ei), tgt, reset=(ei==0), loss_from_model=args.loss_from_model)
+            target = None if predict_only else get_frame(x, ei+args.n_hist)
+            tgt = None if predict_only else self.get_ch(target, sl_tgt)
+            y, step_loss, step_loss_item = self.model_y_loss(get_frame(x,ei, args.n_hist, args.input_hist), tgt, reset=(ei==0), loss_from_model=args.loss_from_model)
             if not predict_only:
                 if step_loss_item: loss_item.append(step_loss_item)
                 loss += step_loss
-        x_in = get_frame(x,n_in-1)
+        x_in = get_frame(x,n_in-args.n_hist, args.n_hist, args.input_hist)
         if isinstance(x, (tuple, list)): cell = tuple(x[0].cell_shape[:args.dim].cpu().numpy()) if args.dim>0 else tuple()
         for di in range(n_out):
             target = None if predict_only else get_frame(x,n_in+di)
-            tgt = None if predict_only else (target if isinstance(x, (tuple, list)) else (target[:, :self.args.nfeat_out] if args.channel_first else target[..., :self.args.nfeat_out]))
+            tgt = None if predict_only else self.get_ch(target, sl_tgt)
             y, step_loss, step_loss_item = self.model_y_loss(x_in, tgt, reset=(not RNN) or ((n_in==1) and (di==0)), loss_from_model=args.loss_from_model)
             if not predict_only:
                 if step_loss_item: loss_item.append(step_loss_item)
                 loss += step_loss
-            if args.nfeat_in>args.nfeat_out and (not predict_only) and (not isinstance(x, (tuple, list))):
-                y = torch.cat([y, target[:, args.nfeat_out:] if args.channel_first else target[..., args.nfeat_out:]], self.ich)
+            if args.nfeat_in>args.nfeat_out and (not isinstance(x, (tuple, list))):
+                other_in = x_in if predict_only else target
+                y = torch.cat([y, self.get_ch(other_in, slice(args.nfeat_out,args.nfeat_in))], self.ich)
             traj.append((y.x.reshape((len(x[0].ptr)-1,)+cell+(-1,)) if isinstance(x, (tuple, list)) else y).detach())
-            x_in = y
+            x_in_frame = y
+            if di < n_out-1:
+                if args.input_hist:
+                    x_in = torch.cat((x_in[:, :-1], x_in_frame[:,None]), self.ich)
+                else:
+                    x_in = x_in_frame
         return torch.stack(traj, 1), np.mean(loss_item, 0) if loss_item else []
 
     def get_scheduled_input(self, y, target, epoch):
@@ -317,21 +371,21 @@ class Trainer():
         elif flag == 0:
             x_in = y
         else:
-            "TBD"
+            raise ValueError(f"unknown schedule {flag=}")
         return x_in
 
     def get_real_input_flag(self, itr=1):
         args = self.args
-        if args.rnn_scheduled_sampling == 'reverse':
+        if args.scheduled_sampling == 'reverse':
             real_input_flag = reserve_schedule_sampling_exp(itr, args)
-        elif args.rnn_scheduled_sampling == 'decrease':
+        elif args.scheduled_sampling == 'decrease':
             real_input_flag = schedule_sampling(itr, args)
-        elif args.rnn_scheduled_sampling == 'GT':
+        elif args.scheduled_sampling == 'GT':
             real_input_flag = 1
-        elif args.rnn_scheduled_sampling == 'PD':
+        elif args.scheduled_sampling == 'PD':
             real_input_flag = 0
         else:
-            raise ValueError(f'unknown rnn_scheduled_sampling {args.rnn_scheduled_sampling}')
+            raise ValueError(f'unknown {args.scheduled_sampling=}')
         return real_input_flag
 
 

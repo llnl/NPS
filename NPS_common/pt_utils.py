@@ -99,3 +99,8 @@ def bin2dec(b, bits):
     mask = 2 ** torch.arange(bits - 1, -1, -1).to(b.device, b.dtype)
     return torch.sum(mask * b, -1)
 
+
+from scipy.spatial.transform import Rotation
+def rand_rotmat3d(to_torch=True):
+    mat = Rotation.random().as_matrix()
+    return torch.tensor(mat) if to_torch else mat

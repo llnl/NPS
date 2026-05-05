@@ -5,9 +5,9 @@ import datetime
 from functools import reduce
 from importlib import import_module
 
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
+# import matplotlib
+# matplotlib.use('Agg')
+# import matplotlib.pyplot as plt
 
 import numpy as np
 #import imageio
@@ -134,8 +134,10 @@ class checkpoint():
             np.save('%s/%s%04d.npy'%(self.dir, t, idx), to_channellast(v, self.dim))
 
 def to_channellast(arr, dim):
+    if not isinstance(arr, (np.ndarray, torch.Tensor)):
+        return arr
     ndim=len(arr.shape)
-    return np.transpose(arr, list(range(ndim-dim-1))+list(range(ndim-dim,ndim))+[ndim-dim-1])
+    return (np.transpose if isinstance(arr, np.ndarray) else torch.permute)(arr, list(range(ndim-dim-1))+list(range(ndim-dim,ndim))+[ndim-dim-1])
 
 def quantize(img, rgb_range):
     pixel_range = 255 / rgb_range
@@ -188,13 +190,19 @@ def make_optimizer(args, model):
             'betas': (args.beta1, args.beta2),
             'eps': args.epsilon
         }
+    elif opt == 'radam':
+        optimizer_function = optim.RAdam
+        kwargs = {
+            'betas': (args.beta1, args.beta2),
+            'eps': args.epsilon
+        }
     elif opt == 'rmsprop':
         optimizer_function = optim.RMSprop
         kwargs = {'eps': args.epsilon}
 
     kwargs['lr'] = args.lr
     kwargs['weight_decay'] = args.wd
-    
+
     return optimizer_function(trainable, **kwargs)
 
 def make_scheduler(args, my_optimizer):
@@ -208,13 +216,29 @@ def make_scheduler(args, my_optimizer):
     elif sch == 'plateau':
         scheduler = lrs.ReduceLROnPlateau(my_optimizer,
             mode='min', patience=args.lr_decay_patience, min_lr=args.lr_min,
-            factor=args.lr_decay_factor,verbose=True)
+            factor=args.lr_decay_factor)
     elif sch == 'onecycle':
-        scheduler = lrs.OneCycleLR(my_optimizer, max_lr=args.lr, 
+        scheduler = lrs.OneCycleLR(my_optimizer, max_lr=args.lr,
           final_div_factor=int(args.lr/args.lr_min), total_steps=args.lr_decay_step)
     elif sch == 'cosine':
         scheduler = lrs.CosineAnnealingLR(my_optimizer, args.lr_decay_step,
           eta_min=args.lr_min, verbose=True)
+    elif sch == 'linearwarmupcosineannealinglr':
+        from NPS_common.lr_scheduler import get_cosine_schedule_with_warmup
+        scheduler = get_cosine_schedule_with_warmup(my_optimizer,  num_warmup_steps=args.lr_decay_patience,
+            num_training_steps=args.lr_decay_step,
+            min_lr_ratio=args.lr_min/args.lr)
+        # try:
+        #     from flash.core.optimizers.lr_scheduler import LinearWarmupCosineAnnealingLR
+        # except:
+        #     from NPS_common.lr_scheduler import LinearWarmupCosineAnnealingLR
+        # scheduler = LinearWarmupCosineAnnealingLR(
+        #     optimizer=my_optimizer,
+        #     warmup_epochs=args.lr_decay_patience,
+        #     max_epochs=args.lr_decay_step,
+        #     warmup_start_lr=args.lr_min, eta_min=args.lr_min,
+        # )
+
     elif sch.find('step') >= 0:
         raise 'ERROR not implemented'
         milestones = args.decay_type.split('_')
