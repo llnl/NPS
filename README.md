@@ -11,33 +11,19 @@ NPS is a package of codes for training and applying neural network models for ma
 * Crystal structure denoising, phase classification, and order-parameter analysis
 
 ## Training ground-truth or high-fidelity method
-The NPS surrogate models can be trained from various ground truth simulation methods, which are supposed to be accurate but expensive, such as
-* Molecular dynamics
-* Phase field methods
-* Kinetic Monte Carlo
-* Discrete dislocation dynamics
+The NPS surrogate models can be trained from various ground truth simulation methods, which are supposed to be accurate but expensive, such as **molecular dynamics**, phase field methods, Kinetic Monte Carlo and discrete dislocation dynamics.
 
 ## Networks:
-  * Convolutional neural networks (ResNet, U-net, ConvNext)
-  * Convolutional LSTM (PredRNN, PredRNN++, E3dLSTM)
-  * Graph neural networks
-  * Rotationally equivariant GNN
-  * Diffusion model
-<!--  * VAE with RNN on latent bottleneck (TBD)
-  * Attention based, transformer like (TBD) -->
-<!--Loss functions:
-  * L1, L2 loss of pixels/voxels-->
-<!--  * GAN loss (TBD)
-  * Perceptual loss (TBD) -->
-<!--Special ops -->
-<!--  * Point group symmetry through data augmentation -->
-<!--  * Attention (TBD) -->
+* Convolutional neural networks, convolutional RNN
+* Graph neural networks and equivariant GNN
+* Transformer
+* Diffusion model
 
 # Installation
 NPS requires:
 * Python >= 3.6
 * PyTorch >= 1.9
-* Torch Geometric, [E3NN](https://github.com/e3nn/e3nn)
+* Torch Geometric, e3nn
 * Numpy, Scipy, Matplotlib
 
 # Getting started
@@ -57,7 +43,7 @@ See the [tutorial](examples/tutorial.md)
 # Publications that use this repository
 1. B. Lei, E. Chen, H. Kwon, T. Hsu, B. Sadigh, V. Lordi, T. Frolov, and F. Zhou, "Grand canonical diffusion model for crystalline phases and grain boundaries", [arXiv:2408.15601](http://arxiv.org/abs/2408.15601).
 1. L. Sun, V. H. Nguyen, S. Liu, J. Klepeis, and F. Zhou, "Learning Noisy Dynamics of Spinodal Decomposition from Stochastic Differential Equations", [arXiv:2604.09664](https://arxiv.org/abs/2604.09664).
-1. H. Kwon, B. Sadigh, S. Hamel, V. Lordi, J. Klepeis, and F. Zhou, "A probabilistic foundation model for crystal structure denoising, phase classification, and order parameters", [arXiv:2512.11077](https://arxiv.org/abs/2512.11077), submitted to Acta Materialia.
+1. H. Kwon, B. Sadigh, S. Hamel, V. Lordi, J. Klepeis, and F. Zhou, "A probabilistic framework for crystal structure denoising, phase classification, and order parameters", [arXiv:2512.11077](https://arxiv.org/abs/2512.11077).
 1. K. Ji, L. Sun, S. Liu, F. Zhou, and T. W. Heo, "Scalable Autoregressive Deep Surrogates for Dendritic Microstructure Dynamics", [arXiv:2511.03884](http://arxiv.org/abs/2511.03884), submitted to Patterns (2025).
 1. Z. Tian, E. Suwandi, T. Oppelstrup, V. V. Bulatov, J. B. Harley, and F. Zhou, "Scaling Kinetic Monte-Carlo Simulations of Grain Growth with Combined Convolutional and Graph Neural Networks", [Acta Materialia 311, 122153 (2026)](https://doi.org/10.1016/j.actamat.2026.122153).
 1. H. Kwon, T. Hsu, W. Sun, W. Jeong, F. Aydin, J. Chapman, X. Chen, M. R. Carbone, D. Lu, F. Zhou, and T. A. Pham, "Spectroscopy-Guided Discovery of Three-Dimensional Structures of Disordered Materials with Diffusion Models", [Machine Learning: Science and Technology 5, 045037 (2024)](https://iopscience.iop.org/article/10.1088/2632-2153/ad8c10).
