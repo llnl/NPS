@@ -12,16 +12,25 @@ options, data = process_parser(options)
 nplot = len(options.data)
 fig, axs = setup_plots(options)
 
+# Handle per-file range
+if options.range_per_file:
+    vmin_list = [r[0] for r in options.range_per_file]
+    vmax_list = [r[1] for r in options.range_per_file]
+else:
+    vmin_list = [options.range[0]] * nplot
+    vmax_list = [options.range[1]] * nplot
+
 ims=[]
 for i in range(nplot):
     ax = axs[i]
-    # note using global vmin, vmax
-    ims.append(ax.imshow(data[i][0,:,:], cmap=plt.get_cmap(options.cmap), vmin=options.range[0], vmax=options.range[1], interpolation=options.interp))
+    # note using per-file or global vmin, vmax
+    ims.append(ax.imshow(data[i][0,:,:], cmap=plt.get_cmap(options.cmap), vmin=vmin_list[i], vmax=vmax_list[i], interpolation=options.interp))
 #        fig.colorbar(ims[i], ax=ax)
     ax.set_xlim((0, data[i].shape[2]))
     ax.set_ylim((0, data[i].shape[1]))
     if options.stamp: ax.set_title('0')
     if not options.axis: ax.set_axis_off()
+fig.tight_layout()
 
 # animation function. This is called sequentially
 def animate(t):
