@@ -19,7 +19,7 @@ parser.add_argument("--voxel_filter", default='', help="filter for voxels")
 parser.add_argument("--size", type=int, default=32, help="array size of flat .bin")
 parser.add_argument("--nbins", type=int, default=64, help="no. bins for histogram (type=hist)")
 parser.add_argument("--hist_ylinear", action='store_true', help="Switching to linear scale plot (default is log)")
-parser.add_argument("--view3d", type=str, default="210,165", help="azim=,elev")
+parser.add_argument("--view3d", type=str, default="", help="azim,elev (default: 210,165 for slice, 210,30 for voxel)")
 options = parser.parse_args()
 options.DIM = 3
 if options.type in ("hist2d",) and (options.ichannel != ":"):
@@ -48,15 +48,17 @@ if options.type in ('slice', 'iso'):
             data[i] = data[i][..., 0]
 def hide_inside(arr):
     N123 = arr.shape[:3]
-    flag = np.zeros(N123, dtype=bool)
-    flag[[0, -1], :, :] = True
-    flag[:, [0, -1], :] = True
-    flag[:, :, [0, -1]] = True
+    flag = np.ones(N123, dtype=bool)
+    # Only hide voxels that are interior in all three dimensions
+    if N123[0] > 2 and N123[1] > 2 and N123[2] > 2:
+        flag[1:-1, 1:-1, 1:-1] = False
     return flag
-    # return flag[...,None].tile((1,1,1,arr.shape[3])) if arr.ndim==4 else flag
 options.voxel_filter = eval(options.voxel_filter) if options.voxel_filter else hide_inside
 cmap = eval(f"plt.cm.{options.cmap}")
-options.view3d = [None,None] if options.view3d=="" else list(map(int, options.view3d.split(",")))
+if options.view3d == "":
+    options.view3d = [210, 165] if options.type == "slice" else [210, 30]
+else:
+    options.view3d = list(map(int, options.view3d.split(",")))
 
 options.index2d = list(filter(bool, options.index2d.split(',')))
 if len(options.index2d) == 1: options.index2d *= nplot
@@ -72,10 +74,10 @@ else:
     axs=[fig.add_subplot(nrow, ncol, i+1, projection='3d') for i in range(nplot)]
     for iax, ax in enumerate(axs):
         ax.view_init(azim=options.view3d[0], elev=options.view3d[1])
-        ax.set_axis_off()
         xmin=0; ymin=0; zmin=0
         xmax=data[iax][0].shape[0]; ymax=data[iax][0].shape[1]; zmax=data[iax][0].shape[2]
         ax.set(xlim=[xmin, xmax], ylim=[ymin, ymax], zlim=[zmin, zmax])
+        ax.set_axis_off()
         edges_kw = dict(color='white', linewidth=1, zorder=1e3)
         ax.plot([xmin,xmin,xmax,xmax,xmin,xmin,xmin,xmin], [ymin,ymax,ymax,ymin,ymin,ymin,ymax,ymax], [zmin,zmin,zmin,zmin,zmin,zmax,zmax,zmin], **edges_kw)
         ax.plot([xmax,xmax,xmin], [ymin,ymin,ymin], [zmin,zmax,zmax], **edges_kw)
@@ -126,36 +128,41 @@ else:
 
 def plot_3D_slice(array, ax, imin, imax):
     pic = []
-    # min_val = array.min()
-    # max_val = array.max()
     n_x, n_y, n_z = array.shape
-    # cmap = plt.cm.YlOrRd
-    nx0=ny0=nz0=0
+    nx0 = ny0 = nz0 = 0
 
-    x_cut = array[nx0,:,:]
-    Y, Z = np.mgrid[0:n_y, 0:n_z]
-    X = nx0 * np.ones((n_y, n_z))
-    pic.append(ax.plot_surface(X, Y, Z, rstride=1, cstride=1, facecolors=cmap((x_cut-imin)/(imax-imin))))
-    #ax.set_title("x slice")
+    # Create coordinate grids that are (N+1) in size
+    # This creates the "fences" between which the "tiles" (voxels) sit
+    x_range = np.arange(n_x + 1)
+    y_range = np.arange(n_y + 1)
+    z_range = np.arange(n_z + 1)
 
-    y_cut = array[:,ny0,:]
-    X, Z = np.mgrid[0:n_x, 0:n_z]
-    Y = ny0 * np.ones((n_x, n_z))
-    #fig = plt.figure()
-    #ax = fig.add_subplot(111, projection='3d')
-    pic.append(ax.plot_surface(X, Y, Z, rstride=1, cstride=1, facecolors=cmap((y_cut-imin)/(imax-imin))))
-    #ax.set_title("y slice")
+    # Normalized color data
+    def get_colors(slice_data):
+        return cmap((slice_data - imin) / (imax - imin))
 
-    z_cut = array[:,:,nz0]
-    X, Y = np.mgrid[0:n_x, 0:n_y]
-    Z = nz0 * np.ones((n_x, n_y))
-    #fig = plt.figure()
-    #ax = fig.add_subplot(111, projection='3d')
-    pic.append(ax.plot_surface(X, Y, Z, rstride=1, cstride=1, facecolors=cmap((z_cut-imin)/(imax-imin))))
-    #ax.set_title("z slice")
+    # X slice (at x=0)
+    # Grid is (n_y+1, n_z+1), Data is (n_y, n_z)
+    Y, Z = np.meshgrid(y_range, z_range, indexing='ij')
+    X = nx0 * np.ones_like(Y)
+    pic.append(ax.plot_surface(X, Y, Z, facecolors=get_colors(array[nx0, :, :]),
+                               shade=False, rstride=1, cstride=1))
+
+    # Y slice (at y=0)
+    # Grid is (n_x+1, n_z+1), Data is (n_x, n_z)
+    X, Z = np.meshgrid(x_range, z_range, indexing='ij')
+    Y = ny0 * np.ones_like(X)
+    pic.append(ax.plot_surface(X, Y, Z, facecolors=get_colors(array[:, ny0, :]),
+                               shade=False, rstride=1, cstride=1))
+
+    # Z slice (at z=0)
+    # Grid is (n_x+1, n_y+1), Data is (n_x, n_y)
+    X, Y = np.meshgrid(x_range, y_range, indexing='ij')
+    Z = nz0 * np.ones_like(X)
+    pic.append(ax.plot_surface(X, Y, Z, facecolors=get_colors(array[:, :, nz0]),
+                               shade=False, rstride=1, cstride=1))
+
     return pic
-    #plt.show()
-
 
 def plot_3D_iso(arr, ax):
     from skimage import measure
@@ -169,14 +176,13 @@ def plot_3D_voxel(arr, ax, imin, imax):
     ax.clear()
     voxel_flag = options.voxel_filter(arr)
     voxel_color = arr if arr.ndim==4 else cmap(((arr-imin)/(imax-imin)))
-    # print(f'    voxel count:', voxel_flag.sum(), f"{voxel_flag.shape=} {voxel_color.shape=}")
-    # if voxel_color.shape[-1] < 3:
-    #     voxel_color = np.pad(voxel_color, ((0,0),(0,0),(0,0),(0,3-voxel_color.shape[-1])))
-    # return [ax.voxels(voxel_flag, facecolors= ((voxel_color-imin)/(imax-imin)))]
     ax.set_xlim3d(0, voxel_flag.shape[0])
     ax.set_ylim3d(0, voxel_flag.shape[1])
     ax.set_zlim3d(0, voxel_flag.shape[2])
-    return [ax.voxels(voxel_flag, facecolors=voxel_color, cmap=cmap, edgecolors='k', linewidth=0.1, shade=True)]
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_zticks([])
+    return [ax.voxels(voxel_flag, facecolors=voxel_color, cmap=cmap, edgecolors=None, shade=True)]
 
 
 def frame_slice(frm, xyz, idx):
