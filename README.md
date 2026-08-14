@@ -41,6 +41,7 @@ python -m NPS/main.py --mode=predict ...
 See the [tutorial](examples/tutorial.md)
 
 # Publications that use this repository
+1. K. Ji, L. Sun, S. Liu, C. A. Orme, G. Bucci, M. A. Worsley, F. Zhou, and T. W. Heo, "Scalable Autoregressive Deep Surrogates for Complex Microstructure Dynamics", [arXiv:2511.03884](http://arxiv.org/abs/2511.03884), Machine Learning: Science and Technology, accepted (2026). <span style="color: green; font-size: 200%;">[**>>CODE**](notebooks/dendrite/)</span>
 1. B. Lei, E. Chen, H. Kwon, T. Hsu, B. Sadigh, V. Lordi, T. Frolov, and F. Zhou, "Grand canonical diffusion model for crystalline phases and grain boundaries", [arXiv:2408.15601](http://arxiv.org/abs/2408.15601).
 1. L. Sun, V. H. Nguyen, S. Liu, J. Klepeis, and F. Zhou, "Learning Noisy Dynamics of Spinodal Decomposition from Stochastic Differential Equations", [arXiv:2604.09664](https://arxiv.org/abs/2604.09664).
 1. H. Kwon, B. Sadigh, S. Hamel, V. Lordi, J. Klepeis, and F. Zhou, "A probabilistic framework for crystal structure denoising, phase classification, and order parameters", [arXiv:2512.11077](https://arxiv.org/abs/2512.11077).
